@@ -51,46 +51,20 @@ def generate_similar_words(word, word_list, n=2):
     similarities.sort(key=lambda x: x[1], reverse=True)
     return [w for w, _ in similarities[:n]]
 
-# @app.get("/generate", response_model=ChoiceResponse)
-# def generate_quiz():
-#     # try:
-#     #     target_word = requests.get('https://random-word-api.herokuapp.com/word?length=8').json()[0]
-#     #     word_list = requests.get('https://random-word-api.herokuapp.com/word?number=100').json()
-#     # except Exception as e:
-#     #     return {"error": f"Failed to fetch words: {e}"}
-    
-#     try:
-#         target_word = requests.get('https://random-word-api.vercel.app/api?words=1').json()[0]
-#         word_list = requests.get('https://random-word-api.vercel.app/api?words=10').json()
-#     except Exception as e:
-#         raise HTTPException(status_code=500, detail=f"Failed to fetch words: {e}")
-
-#     similar_words = generate_similar_words(target_word, word_list)
-
-#     audio_filename = f"audio_{uuid.uuid4().hex}.wav"
-#     for _, _, audio in pipeline(target_word, voice='af_heart'):
-#         with open(audio_filename, "wb") as f:
-#             f.write(audio)
-#         break
-
-#     choices = [target_word] + similar_words
-#     random.shuffle(choices)
-
-#     return ChoiceResponse(
-#         correct=target_word,
-#         choices=choices,
-#         audio_file=audio_filename
-#     )
-
-
 @app.get("/generate", response_model=ChoiceResponse)
 def generate_quiz():
-    fallback_words = ["banana", "chocolate", "pineapple", "university", "information",
-                      "creativity", "sensation", "tremendous", "technology", "generation"]
-    
-    target_word = random.choice(fallback_words)
-    word_list = random.sample(fallback_words, len(fallback_words))
-    similar_words = generate_similar_words(target_word, word_list, n=3)
+    try:
+        # Fetch 10 random words from the external API
+        word_list = requests.get('https://random-word-api.vercel.app/api?words=10').json()
+        target_word = random.choice(word_list)
+        similar_words = generate_similar_words(target_word, word_list, n=3)
+    except Exception as e:
+        # Fallback in case of any API/network issue
+        fallback_words = ["banana", "chocolate", "pineapple", "university", "information",
+                          "creativity", "sensation", "tremendous", "technology", "generation"]
+        target_word = random.choice(fallback_words)
+        word_list = random.sample(fallback_words, len(fallback_words))
+        similar_words = generate_similar_words(target_word, word_list, n=3)
 
     audio_filename = "current_question.wav"
 
@@ -98,7 +72,7 @@ def generate_quiz():
         for _, _, audio_tensor in pipeline(target_word, voice='af_heart'):
             audio_np = audio_tensor.detach().cpu().numpy()
             audio_np = (audio_np * 32767).astype(np.int16)  # Convert to 16-bit PCM
-            write_wav(audio_filename, 22000, audio_np)  # Sample rate = 22000
+            write_wav(audio_filename, 22000, audio_np)
             break
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"TTS generation failed: {e}")
