@@ -1,40 +1,60 @@
 import os
 import pandas as pd
-import torchaudio
+import soundfile as sf
+import numpy as np
+import torch
 from datasets import Dataset, Audio
+from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech
+from transformers import Seq2SeqTrainer, Seq2SeqTrainingArguments
+from dataclasses import dataclass
+from typing import Any, Dict, List, Union
 
-# Set your local path to LJSpeech
+# --------------------------
+# 1. Load and filter dataset
+# --------------------------
+
 LJS_PATH = "LJSpeech-1.1"
+metadata_path = os.path.join(LJS_PATH, "metadata.csv")
+print(f"Loading metadata from {metadata_path}")
 
 # Load metadata
-metadata_path = os.path.join(LJS_PATH, "metadata.csv")
 df = pd.read_csv(metadata_path, sep='|', header=None, names=["file_id", "normalized_text", "unused"])
+print("Metadata loaded successfully.")
 
-# Filter rows: keep only files LJ001-0001 to LJ001-0186
-allowed_ids = [f"LJ001-{i:04d}" for i in range(1, 187)]  # 001 to 186
+# Filter rows: keep only LJ001-0001 to LJ001-0186
+allowed_ids = [f"LJ001-{i:04d}" for i in range(1, 187)]
 df = df[df["file_id"].isin(allowed_ids)].reset_index(drop=True)
 
-# Create full paths to audio files
+# Add full path to .wav files
 df["audio_path"] = df["file_id"].apply(lambda x: os.path.join(LJS_PATH, "wavs", f"{x}.wav"))
 
-# Create Hugging Face Dataset from pandas
+# Filter out corrupted files BEFORE casting
+valid_rows = []
+for _, row in df.iterrows():
+    try:
+        sf.read(row["audio_path"])
+        valid_rows.append(row)
+    except Exception as e:
+        print(f"Skipping corrupted file: {row['audio_path']} ({e})")
+
+# Use valid files only
+df = pd.DataFrame(valid_rows)
+
+# Create Hugging Face Dataset
 ds = Dataset.from_pandas(df[["audio_path", "normalized_text"]])
-
-# Rename columns to expected format
 ds = ds.rename_columns({"audio_path": "audio", "normalized_text": "normalized_text"})
-
-# Cast to Hugging Face Audio format (with resampling)
 ds = ds.cast_column("audio", Audio(sampling_rate=16000))
 
 # Preview
 print(ds[0])
-len(ds)
+print(f"Dataset size: {len(ds)}")
 
-import numpy as np
-from transformers import SpeechT5Processor
+# --------------------------
+# 2. Preprocessing
+# --------------------------
 
 processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
-DUMMY_SPEAKER_EMBEDDING = np.zeros(512)  # Or use random: np.random.rand(512)
+DUMMY_SPEAKER_EMBEDDING = np.zeros(512)
 
 def prepare_dataset(example):
     audio = example["audio"]
@@ -44,19 +64,16 @@ def prepare_dataset(example):
         sampling_rate=audio["sampling_rate"],
         return_attention_mask=False,
     )
-    example["labels"] = example["labels"][0]  # Strip batch dim
+    example["labels"] = example["labels"][0]  # Remove batch dim
     example["speaker_embeddings"] = DUMMY_SPEAKER_EMBEDDING
     return example
 
-dataset = ds.map(prepare_dataset, remove_columns=ds.column_names)
+ds = ds.map(prepare_dataset, remove_columns=ds.column_names)
+dataset = ds.train_test_split(test_size=0.1)
 
-
-dataset = dataset.train_test_split(test_size=0.1)
-
-
-from dataclasses import dataclass
-from typing import Any, Dict, List, Union
-import torch
+# --------------------------
+# 3. Data Collator
+# --------------------------
 
 @dataclass
 class TTSDataCollatorWithPadding:
@@ -67,10 +84,10 @@ class TTSDataCollatorWithPadding:
         label_features = [{"input_values": feature["labels"]} for feature in features]
         speaker_features = [feature["speaker_embeddings"] for feature in features]
 
-        batch = processor.pad(input_ids=input_ids, labels=label_features, return_tensors="pt")
+        batch = self.processor.pad(input_ids=input_ids, labels=label_features, return_tensors="pt")
 
         batch["labels"] = batch["labels"].masked_fill(
-            batch.decoder_attention_mask.unsqueeze(-1).ne(1), -100
+            batch["decoder_attention_mask"].unsqueeze(-1).ne(1), -100
         )
         del batch["decoder_attention_mask"]
 
@@ -83,17 +100,18 @@ class TTSDataCollatorWithPadding:
         batch["speaker_embeddings"] = torch.tensor(speaker_features)
         return batch
 
-
 data_collator = TTSDataCollatorWithPadding(processor=processor)
 
-
-from transformers import SpeechT5ForTextToSpeech
+# --------------------------
+# 4. Load Model
+# --------------------------
 
 model = SpeechT5ForTextToSpeech.from_pretrained("microsoft/speecht5_tts")
 model.config.use_cache = False
 
-
-from transformers import Seq2SeqTrainingArguments, Seq2SeqTrainer
+# --------------------------
+# 5. Training Arguments
+# --------------------------
 
 training_args = Seq2SeqTrainingArguments(
     output_dir="speechT5_finetuned_ljspeech",
@@ -101,10 +119,10 @@ training_args = Seq2SeqTrainingArguments(
     gradient_accumulation_steps=8,
     learning_rate=1e-5,
     warmup_steps=500,
-    max_steps=4000,
+    max_steps=100,
     gradient_checkpointing=True,
     fp16=False,
-    eval_strategy="steps",
+    evaluation_strategy="steps",
     per_device_eval_batch_size=2,
     save_steps=1000,
     eval_steps=1000,
@@ -115,6 +133,10 @@ training_args = Seq2SeqTrainingArguments(
     label_names=["labels"],
 )
 
+# --------------------------
+# 6. Trainer & Run
+# --------------------------
+
 trainer = Seq2SeqTrainer(
     args=training_args,
     model=model,
@@ -123,6 +145,5 @@ trainer = Seq2SeqTrainer(
     data_collator=data_collator,
     tokenizer=processor,
 )
-
 
 trainer.train()
