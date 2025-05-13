@@ -116,17 +116,17 @@ model.config.use_cache = False
 training_args = Seq2SeqTrainingArguments(
     output_dir="speechT5_finetuned_ljspeech",
     per_device_train_batch_size=4,
-    gradient_accumulation_steps=8,
-    learning_rate=1e-5,
-    warmup_steps=500,
-    max_steps=100,
-    gradient_checkpointing=True,
+    gradient_accumulation_steps=2,
+    learning_rate=1e-4,
+    warmup_steps=100,
+    max_steps=300,
+    gradient_checkpointing=False,
     fp16=False,
     evaluation_strategy="steps",
     per_device_eval_batch_size=2,
-    save_steps=1000,
-    eval_steps=1000,
-    logging_steps=25,
+    save_steps=300,
+    eval_steps=300,
+    logging_steps=50,
     report_to=["tensorboard"],
     load_best_model_at_end=True,
     greater_is_better=False,
@@ -147,3 +147,4 @@ trainer = Seq2SeqTrainer(
 )
 
 trainer.train()
+trainer.save_model("speechT5_finetuned_ljspeech")
