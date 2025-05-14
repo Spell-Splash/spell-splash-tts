@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Union
 from transformers import pipeline
 import mlflow.pytorch
+from transformers import SpeechT5HifiGan
+from transformers import EvalPrediction
 
 # --------------------------
 # 1. Load and filter dataset
@@ -122,20 +124,22 @@ training_args = Seq2SeqTrainingArguments(
     output_dir="speechT5_finetuned_ljspeech",
     per_device_train_batch_size=4,
     gradient_accumulation_steps=2,
-    learning_rate=1e-4,
+    learning_rate=5e-5,
     warmup_steps=100,
-    max_steps=300,
-    gradient_checkpointing=False,
+    max_steps=1000,
+    gradient_checkpointing=True,
     fp16=False,
     evaluation_strategy="steps",
     per_device_eval_batch_size=2,
-    save_steps=300,
-    eval_steps=300,
-    logging_steps=50,
-    report_to=["tensorboard"],
+    save_steps=100,
+    eval_steps=100,
+    logging_steps=20,
+    report_to=["tensorboard", "mlflow"],
     load_best_model_at_end=True,
+    save_total_limit=3,
     greater_is_better=False,
     label_names=["labels"],
+    metric_for_best_model="eval_loss",
 )
 
 trainer = Seq2SeqTrainer(
@@ -166,16 +170,33 @@ with mlflow.start_run(run_name="speechT5_run"):
 
     trainer.train()
     trainer.save_model("speechT5_finetuned_ljspeech")
+    trainer.evaluate(predict_with_generate=False)
+
 
     tracking_type = urlparse(mlflow.get_tracking_uri()).scheme
 
-    mlflow.pytorch.log_model(
-        pytorch_model=model,
+    mlflow.transformers.log_model(
+        transformers_model={
+            "model": model,
+            "tokenizer": processor.tokenizer,
+            "feature_extractor": processor.feature_extractor
+        },
         artifact_path="speechT5_model",
         registered_model_name="SpeechT5ThaiModel" if tracking_type != "file" else None
     )
 
-    processor.save_pretrained("speechT5_finetuned_ljspeech")
-    mlflow.log_artifacts("speechT5_finetuned_ljspeech", artifact_path="processor")
+    vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan")
+    vocoder.eval()
 
-    mlflow.log_metric("final_loss", trainer.state.log_history[-1].get("loss", -1))
+    model.save_pretrained("speechT5_finetuned_ljspeech")
+    processor.save_pretrained("speechT5_finetuned_ljspeech")
+
+    mlflow.log_artifacts("speechT5_finetuned_ljspeech", artifact_path="model")
+
+    # mlflow.log_metric("final_loss", trainer.state.log_history[-1].get("loss", -1))
+    for entry in reversed(trainer.state.log_history):
+        if "loss" in entry:
+            mlflow.log_metric("final_loss", entry["loss"])
+            break
+        else:
+            mlflow.log_metric("final_loss", -1)
