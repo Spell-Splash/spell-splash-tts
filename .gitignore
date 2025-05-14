@@ -172,3 +172,13 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+.DS_Store
+current_question.wav
+.vscode/settings.json
+/LJSpeech-1.1
+/mlartifacts
+/mlruns
+/speechT5_finetuned_ljspeech
+output_after.wav
+output_before.wav
+/speechT5_baseline_bad
