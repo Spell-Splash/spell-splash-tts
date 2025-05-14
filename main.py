@@ -18,7 +18,7 @@ speaker_embeddings = torch.tensor(np.zeros((1, 512), dtype=np.float32))
 
 
 # Text input
-text = "Good Morning, how are you doing today? I hope you are having a great day!"
+text = input("Enter text to synthesize: ")
 
 # Tokenize text
 inputs = processor(text=text, return_tensors="pt")
@@ -44,7 +44,7 @@ librosa.display.specshow(mel.T, sr=16000, hop_length=256, x_axis='time', y_axis=
 plt.colorbar(format="%+2.f dB")
 plt.title("Mel-Spectrogram (Before Vocoder)")
 plt.tight_layout()
-plt.savefig("visual/mel_spectrogram.png")
+plt.savefig(f"visual/{text}_mel_spectrogram.png")
 plt.show()
 
 
@@ -84,7 +84,7 @@ plt.title("Generated Waveform (After Vocoder)")
 plt.xlabel("Time (s)")
 plt.ylabel("Amplitude")
 plt.tight_layout()
-plt.savefig("visual/waveform.png")
+plt.savefig(f"visual/{text}_waveform.png")
 plt.show()
 
 print(speech.shape, speech.dtype)
