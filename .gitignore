@@ -181,3 +181,4 @@ current_question.wav
 /speechT5_finetuned_ljspeech
 output_after.wav
 output_before.wav
+/speechT5_baseline_bad
