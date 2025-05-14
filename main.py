@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import librosa
 import librosa.display
 
+
 # Load processor from base model
 processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
 
@@ -16,9 +17,8 @@ model = SpeechT5ForTextToSpeech.from_pretrained("speechT5_finetuned_ljspeech")
 # Dummy speaker embedding (512-dim vector)
 speaker_embeddings = torch.tensor(np.zeros((1, 512), dtype=np.float32))
 
-
 # Text input
-text = input("Enter text to synthesize: ")
+text = "Cryptography"
 
 # Tokenize text
 inputs = processor(text=text, return_tensors="pt")
@@ -54,8 +54,8 @@ if speech.ndim > 1:
     speech = speech.squeeze()
 
 # Save to file
-sf.write("output_before.wav", speech.numpy(), 16000)
-print("Generated audio saved as output_before.wav")
+sf.write(f"audio/{text}_output_before.wav", speech.numpy(), 16000)
+print(f"Generated audio saved as audio/{text}_output_before.wav")
 
 
 vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan")
@@ -68,15 +68,14 @@ with torch.no_grad():
         vocoder=vocoder
     )
 
-sf.write("output_after.wav", speech.numpy(), 16000)
-print("Generated audio saved as output_after.wav")
+sf.write(f"audio/{text}_output_after.wav", speech.numpy(), 16000)
+print(f"Generated audio saved as audio/{text}_output_after.wav")
 
 # --------------------------
 # 2. Visualize Final Waveform (with vocoder)
 # --------------------------
 
-# Plot the waveform saved to output_after.wav
-waveform, sr = sf.read("output_after.wav")
+waveform, sr = sf.read(f"audio/{text}_output_after.wav")
 
 plt.figure(figsize=(10, 3))
 plt.plot(np.linspace(0, len(waveform)/sr, len(waveform)), waveform)
