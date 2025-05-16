@@ -89,5 +89,5 @@ def generate_quiz():
 @app.get("/audio/{file_name}")
 def get_audio(file_name: str):
     if not os.path.isfile(file_name):
-        return {"error": "Audio file not found."}
+        raise HTTPException(status_code=404, detail="Audio file not found")
     return FileResponse(file_name, media_type="audio/wav")
