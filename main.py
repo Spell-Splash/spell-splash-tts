@@ -1,89 +1,60 @@
-from transformers import SpeechT5Processor, SpeechT5ForTextToSpeech
-import torch
-import numpy as np
-import soundfile as sf
-from transformers import SpeechT5HifiGan
-import matplotlib.pyplot as plt
-import librosa
-import librosa.display
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import StreamingResponse
+from tts_engine import TTSEngine
+from contextlib import asynccontextmanager
 
+# Global Variable สำหรับเก็บ Engine
+tts_engine = None
 
-# Load processor from base model
-processor = SpeechT5Processor.from_pretrained("microsoft/speecht5_tts")
+# --- Lifespan Event (โหลดโมเดลตอนเปิด Server ทีเดียว) ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global tts_engine
+    try:
+        # เริ่มโหลดโมเดล
+        tts_engine = TTSEngine()
+        yield
+    except Exception as e:
+        print(f"❌ Failed to load TTS Engine: {e}")
+        # ถ้าโหลดไม่ผ่าน Server อาจจะรันไม่ขึ้น หรือควร Handle error
+        raise e
+    finally:
+        print("🛑 Shutting down TTS Service...")
 
-# Load your fine-tuned model weights
-model = SpeechT5ForTextToSpeech.from_pretrained("speechT5_finetuned_ljspeech")
+app = FastAPI(title="Spell Splash TTS Service", lifespan=lifespan)
 
-# Dummy speaker embedding (512-dim vector)
-speaker_embeddings = torch.tensor(np.zeros((1, 512), dtype=np.float32))
+@app.get("/")
+def health_check():
+    return {"status": "ok", "service": "spell-splash-tts", "model": "Kokoro v0.19 (ONNX)"}
 
-# Text input
-text = "Cryptography"
+@app.get("/tts")
+async def text_to_speech(
+    text: str = Query(..., description="ข้อความที่ต้องการให้พูด"),
+    voice: str = Query("af_bella", description="เสียงที่ต้องการ (เช่น af_bella, af_sarah, am_michael)"),
+    speed: float = Query(1.0, description="ความเร็วเสียง")
+):
+    """
+    Generate Audio from Text using Kokoro
+    """
+    if not tts_engine:
+        raise HTTPException(status_code=503, detail="TTS Engine is not ready")
 
-# Tokenize text
-inputs = processor(text=text, return_tensors="pt")
+    try:
+        # เรียก Engine สร้างเสียง
+        audio_buffer = tts_engine.generate_audio_bytes(text, voice, speed)
+        
+        # ส่งไฟล์กลับไป (Streaming)
+        return StreamingResponse(
+            audio_buffer, 
+            media_type="audio/wav",
+            headers={"Content-Disposition": f"inline; filename={text}.wav"}
+        )
 
-# Generate waveform
-with torch.no_grad():
-    speech = model.generate_speech(
-        inputs["input_ids"],
-        speaker_embeddings,
-        vocoder=None
-    )
+    except Exception as e:
+        print(f"❌ Generation Error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
-# --------------------------
-# 1. Visualize Mel-Spectrogram (without vocoder)
-# --------------------------
-
-# The mel spectrogram was returned when using vocoder=None
-# Let's visualize it
-mel = speech.squeeze().cpu().numpy()  # shape: [T, 80]
-
-plt.figure(figsize=(10, 4))
-librosa.display.specshow(mel.T, sr=16000, hop_length=256, x_axis='time', y_axis='mel')
-plt.colorbar(format="%+2.f dB")
-plt.title("Mel-Spectrogram (Before Vocoder)")
-plt.tight_layout()
-plt.savefig(f"visual/{text}_mel_spectrogram.png")
-plt.show()
-
-
-print(speech.shape, speech.dtype)
-
-if speech.ndim > 1:
-    speech = speech.squeeze()
-
-# Save to file
-sf.write(f"audio/{text}_output_before.wav", speech.numpy(), 16000)
-print(f"Generated audio saved as audio/{text}_output_before.wav")
-
-
-vocoder = SpeechT5HifiGan.from_pretrained("microsoft/speecht5_hifigan")
-vocoder.eval()
-
-with torch.no_grad():
-    speech = model.generate_speech(
-        inputs["input_ids"],
-        speaker_embeddings,
-        vocoder=vocoder
-    )
-
-sf.write(f"audio/{text}_output_after.wav", speech.numpy(), 16000)
-print(f"Generated audio saved as audio/{text}_output_after.wav")
-
-# --------------------------
-# 2. Visualize Final Waveform (with vocoder)
-# --------------------------
-
-waveform, sr = sf.read(f"audio/{text}_output_after.wav")
-
-plt.figure(figsize=(10, 3))
-plt.plot(np.linspace(0, len(waveform)/sr, len(waveform)), waveform)
-plt.title("Generated Waveform (After Vocoder)")
-plt.xlabel("Time (s)")
-plt.ylabel("Amplitude")
-plt.tight_layout()
-plt.savefig(f"visual/{text}_waveform.png")
-plt.show()
-
-print(speech.shape, speech.dtype)
+if __name__ == "__main__":
+    import uvicorn
+    # รันที่ Port 8001 ตามแผน
+    uvicorn.run(app, host="0.0.0.0", port=8001)
