@@ -6,13 +6,21 @@ from contextlib import asynccontextmanager
 # Global Variable สำหรับเก็บ Engine
 tts_engine = None
 
-# --- Lifespan Event (โหลดโมเดลตอนเปิด Server ทีเดียว) ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global tts_engine
+    
+    # 1. ปริ้นท์ Dashboard Link ก่อนเลย
+    print("\n" + "="*60)
+    print("✅  TTS Service Ready!")
+    print("🔗  Open Docs: http://localhost:5001/docs")
+    print("="*60 + "\n")
+
     try:
-        # เริ่มโหลดโมเดล
+        # 2. เริ่มโหลดโมเดล
+        print("⏳ Loading Kokoro TTS Model...")
         tts_engine = TTSEngine()
+        print("✅ Kokoro TTS Loaded! Ready to speak.")
         yield
     except Exception as e:
         print(f"❌ Failed to load TTS Engine: {e}")
@@ -56,5 +64,4 @@ async def text_to_speech(
 
 if __name__ == "__main__":
     import uvicorn
-    # รันที่ Port 8001 ตามแผน
-    uvicorn.run(app, host="0.0.0.0", port=8001)
+    uvicorn.run(app, host="0.0.0.0", port=5001)
